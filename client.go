@@ -203,9 +203,11 @@ type apiErrorBody struct {
 	Status  string `json:"status"`
 	Message string `json:"message"`
 
-	// Shape 3: {"success":false, "message":"...", "data":{...}}
-	Success any                         `json:"success"`
-	Data    map[string]json.RawMessage  `json:"data"`
+	// Shape 3a: {"success":false, "message":"...", "data":{...}}
+	// Shape 3b: {"success":false, "message":"...", "errors":{...}}  (Create Template 422)
+	Success any                        `json:"success"`
+	Data    map[string]json.RawMessage `json:"data"`
+	Errors  map[string]json.RawMessage `json:"errors"`
 
 	// Shape 4: {"success": 429}  (rate limit)
 }
@@ -222,7 +224,11 @@ func parseAPIError(statusCode int, body []byte) *APIError {
 		return newAPIError(statusCode, ErrCodeRateLimited, "Too many requests", nil)
 
 	case statusCode == http.StatusUnprocessableEntity:
-		validation := extractValidation(parsed.Data)
+		// Prefer "errors" key (Create Template) then fall back to "data" key.
+		validation := extractValidation(parsed.Errors)
+		if len(validation) == 0 {
+			validation = extractValidation(parsed.Data)
+		}
 		msg := parsed.Message
 		if msg == "" {
 			msg = "Validation errors"

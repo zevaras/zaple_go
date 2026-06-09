@@ -242,6 +242,145 @@ func TestSendTemplate_authHeaders(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Messaging.CreateTemplate
+// ──────────────────────────────────────────────────────────────────────────────
+
+func TestCreateTemplate_success(t *testing.T) {
+	_, client := newTestServer(t, jsonHandler(t, http.StatusOK, map[string]any{
+		"success":     true,
+		"status_code": 200,
+		"message":     "Template submitted for review.",
+		"template_id": 12345,
+	}))
+
+	resp, err := client.Messaging.CreateTemplate(context.Background(), &zaple.CreateTemplateRequest{
+		Title:    "order_update",
+		Category: zaple.TemplateCategoryUtility,
+		Language: "en_US",
+		Content:  "Hi {{1}}, your order {{2}} is ready.",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.TemplateID != 12345 {
+		t.Errorf("TemplateID: got %d, want 12345", resp.TemplateID)
+	}
+	if resp.Message != "Template submitted for review." {
+		t.Errorf("Message: got %q", resp.Message)
+	}
+}
+
+func TestCreateTemplate_validatesRequired(t *testing.T) {
+	client := zaple.NewClient("k", "s")
+
+	tests := []struct {
+		name string
+		req  *zaple.CreateTemplateRequest
+	}{
+		{"nil", nil},
+		{"missing Title", &zaple.CreateTemplateRequest{Category: zaple.TemplateCategoryUtility, Language: "en_US", Content: "body"}},
+		{"missing Category", &zaple.CreateTemplateRequest{Title: "t", Language: "en_US", Content: "body"}},
+		{"missing Language", &zaple.CreateTemplateRequest{Title: "t", Category: zaple.TemplateCategoryUtility, Content: "body"}},
+		{"missing Content non-auth", &zaple.CreateTemplateRequest{Title: "t", Category: zaple.TemplateCategoryUtility, Language: "en_US"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := client.Messaging.CreateTemplate(context.Background(), tt.req)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+		})
+	}
+}
+
+func TestCreateTemplate_authNoContentRequired(t *testing.T) {
+	_, client := newTestServer(t, jsonHandler(t, http.StatusOK, map[string]any{
+		"success": true, "status_code": 200,
+		"message": "Template submitted for review.", "template_id": 99,
+	}))
+
+	// Authentication templates do not require Content.
+	_, err := client.Messaging.CreateTemplate(context.Background(), &zaple.CreateTemplateRequest{
+		Title:                     "login_otp",
+		Category:                  zaple.TemplateCategoryAuthentication,
+		Language:                  "en_US",
+		AddSecurityRecommendation: true,
+		CopyOtpButtonText:         "Copy code",
+		EnableCodeExpiration:      true,
+		CodeExpirationMinutes:     "10",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCreateTemplate_422_usesErrorsKey(t *testing.T) {
+	// Create Template returns validation errors under "errors" key, not "data".
+	_, client := newTestServer(t, jsonHandler(t, http.StatusUnprocessableEntity, map[string]any{
+		"success": false,
+		"status":  "error",
+		"message": "Validation errors",
+		"errors": map[string]any{
+			"title":    []string{"The title field is required."},
+			"category": []string{"The category field is required."},
+		},
+	}))
+
+	_, err := client.Messaging.CreateTemplate(context.Background(), &zaple.CreateTemplateRequest{
+		Title: "t", Category: zaple.TemplateCategoryUtility, Language: "en_US", Content: "body",
+	})
+
+	var apiErr *zaple.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *APIError, got %T", err)
+	}
+	if apiErr.Code != zaple.ErrCodeValidation {
+		t.Errorf("Code: got %q, want %q", apiErr.Code, zaple.ErrCodeValidation)
+	}
+	if len(apiErr.ValidationErrors) == 0 {
+		t.Error("expected ValidationErrors to be populated from 'errors' key")
+	}
+}
+
+func TestCreateTemplate_serialisesButtons(t *testing.T) {
+	var captured map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&captured) //nolint:errcheck
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": true, "status_code": 200,
+			"message": "Template submitted for review.", "template_id": 1,
+		})
+	}))
+	defer srv.Close()
+
+	client := zaple.NewClient("k", "s", zaple.WithBaseURL(srv.URL), zaple.WithMaxRetries(0))
+
+	_, err := client.Messaging.CreateTemplate(context.Background(), &zaple.CreateTemplateRequest{
+		Title:    "promo",
+		Category: zaple.TemplateCategoryMarketing,
+		Language: "en_US",
+		Content:  "Hi {{1}}",
+		Buttons: []zaple.CreateTemplateButton{
+			{Type: "quick_reply", Replies: []zaple.QuickReplyItem{{Text: "Track order"}, {Text: "Contact support"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	buttons, _ := captured["buttons"].([]any)
+	if len(buttons) != 1 {
+		t.Fatalf("expected 1 button, got %d", len(buttons))
+	}
+	btn := buttons[0].(map[string]any)
+	if btn["type"] != "quick_reply" {
+		t.Errorf("button type: got %v, want quick_reply", btn["type"])
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Batch service
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -336,6 +475,189 @@ func TestBatch_Delete_success(t *testing.T) {
 	err := client.Batch.Delete(context.Background(), "batch-001")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Messaging — remaining methods
+// ──────────────────────────────────────────────────────────────────────────────
+
+func TestGetMessageStatus_success(t *testing.T) {
+	_, client := newTestServer(t, jsonHandler(t, http.StatusOK, map[string]any{
+		"message_id":   "abc123",
+		"status":       "delivered",
+		"delivered_at": "2024-06-10T08:30:00Z",
+	}))
+
+	status, err := client.Messaging.GetMessageStatus(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status.Status != "delivered" {
+		t.Errorf("Status: got %q, want delivered", status.Status)
+	}
+}
+
+func TestGetMessageStatus_emptyID(t *testing.T) {
+	client := zaple.NewClient("k", "s")
+	_, err := client.Messaging.GetMessageStatus(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty messageID")
+	}
+}
+
+func TestGetTemplateDetails_success(t *testing.T) {
+	_, client := newTestServer(t, jsonHandler(t, http.StatusOK, map[string]any{
+		"id":       "tpl1",
+		"name":     "order_update",
+		"status":   "APPROVED",
+		"category": "UTILITY",
+		"language": "en_US",
+	}))
+
+	tpl, err := client.Messaging.GetTemplateDetails(context.Background(), "tpl1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tpl.Status != "APPROVED" {
+		t.Errorf("Status: got %q, want APPROVED", tpl.Status)
+	}
+}
+
+func TestGetTemplateDetails_emptyID(t *testing.T) {
+	client := zaple.NewClient("k", "s")
+	_, err := client.Messaging.GetTemplateDetails(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty templateID")
+	}
+}
+
+func TestGetTemplateStatus_success(t *testing.T) {
+	_, client := newTestServer(t, jsonHandler(t, http.StatusOK, map[string]any{
+		"template_id": "tpl1",
+		"status":      "APPROVED",
+	}))
+
+	ts, err := client.Messaging.GetTemplateStatus(context.Background(), "tpl1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ts.Status != "APPROVED" {
+		t.Errorf("Status: got %q, want APPROVED", ts.Status)
+	}
+}
+
+func TestGetTemplateStatus_emptyID(t *testing.T) {
+	client := zaple.NewClient("k", "s")
+	_, err := client.Messaging.GetTemplateStatus(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty templateID")
+	}
+}
+
+func TestGetMessageCount_success(t *testing.T) {
+	_, client := newTestServer(t, jsonHandler(t, http.StatusOK, map[string]any{
+		"total": 100, "delivered": 90, "read": 60, "failed": 10,
+	}))
+
+	count, err := client.Messaging.GetMessageCount(context.Background(), &zaple.MessageCountParams{
+		From: "2024-06-01",
+		To:   "2024-06-30",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count.Total != 100 {
+		t.Errorf("Total: got %d, want 100", count.Total)
+	}
+	if count.Failed != 10 {
+		t.Errorf("Failed: got %d, want 10", count.Failed)
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Batch — remaining methods
+// ──────────────────────────────────────────────────────────────────────────────
+
+func TestBatch_Send_success(t *testing.T) {
+	_, client := newTestServer(t, jsonHandler(t, http.StatusOK, map[string]any{
+		"status":   "Batch queued for sending.",
+		"batch_id": "batch-001",
+	}))
+
+	resp, err := client.Batch.Send(context.Background(), "batch-001", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.BatchID != "batch-001" {
+		t.Errorf("BatchID: got %q, want batch-001", resp.BatchID)
+	}
+}
+
+func TestBatch_Send_emptyID(t *testing.T) {
+	client := zaple.NewClient("k", "s")
+	_, err := client.Batch.Send(context.Background(), "", nil)
+	if err == nil {
+		t.Fatal("expected error for empty batchID")
+	}
+}
+
+func TestBatch_GetStatus_success(t *testing.T) {
+	_, client := newTestServer(t, jsonHandler(t, http.StatusOK, map[string]any{
+		"batch_id":        "batch-001",
+		"status":          "processing",
+		"total_contacts":  50,
+		"sent_count":      30,
+		"delivered_count": 25,
+		"failed_count":    2,
+		"progress":        60.0,
+	}))
+
+	status, err := client.Batch.GetStatus(context.Background(), "batch-001")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status.Status != zaple.BatchStatusProcessing {
+		t.Errorf("Status: got %q, want processing", status.Status)
+	}
+	if status.SentCount != 30 {
+		t.Errorf("SentCount: got %d, want 30", status.SentCount)
+	}
+}
+
+func TestBatch_GetStatus_emptyID(t *testing.T) {
+	client := zaple.NewClient("k", "s")
+	_, err := client.Batch.GetStatus(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty batchID")
+	}
+}
+
+func TestBatch_GetDetails_success(t *testing.T) {
+	_, client := newTestServer(t, jsonHandler(t, http.StatusOK, map[string]any{
+		"id":         "batch-001",
+		"name":       "June Promo",
+		"status":     "completed",
+		"sent_count": 100,
+	}))
+
+	batch, err := client.Batch.GetDetails(context.Background(), "batch-001")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if batch.Name != "June Promo" {
+		t.Errorf("Name: got %q, want June Promo", batch.Name)
+	}
+	if batch.Status != zaple.BatchStatusCompleted {
+		t.Errorf("Status: got %q, want completed", batch.Status)
+	}
+}
+
+func TestBatch_GetDetails_emptyID(t *testing.T) {
+	client := zaple.NewClient("k", "s")
+	_, err := client.Batch.GetDetails(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty batchID")
 	}
 }
 

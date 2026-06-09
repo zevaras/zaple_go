@@ -11,6 +11,7 @@ import "context"
 //	}
 type MessagingAPI interface {
 	SendTemplate(ctx context.Context, req *SendTemplateRequest) (*SendTemplateResponse, error)
+	CreateTemplate(ctx context.Context, req *CreateTemplateRequest) (*CreateTemplateResponse, error)
 	GetMessageStatus(ctx context.Context, messageID string) (*MessageStatus, error)
 	GetTemplateDetails(ctx context.Context, templateID string) (*TemplateDetails, error)
 	GetTemplateStatus(ctx context.Context, templateID string) (*TemplateStatus, error)
