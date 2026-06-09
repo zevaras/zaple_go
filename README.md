@@ -4,7 +4,7 @@
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.22-blue)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Official Go client library for the [Zaple](https://zaple.ai) WhatsApp Business API.
+Go client library for the [Zaple](https://zaple.ai) WhatsApp Business API.
 
 Covers the **Messaging API (V3)** and the **Batch API**.
 

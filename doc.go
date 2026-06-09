@@ -1,4 +1,4 @@
-// Package zaple provides a Go client library for the Zaple WhatsApp Business API.
+// Package zaple provides a Go client library for the Zaple (https://zaple.ai) WhatsApp Business API.
 //
 // # Overview
 //
