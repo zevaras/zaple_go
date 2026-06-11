@@ -53,7 +53,7 @@ client := zaple.NewClient(apiKey, apiSecret,
 
 | Service | Methods |
 |---------|---------|
-| `client.Messaging` | `SendTemplate`, `CreateTemplate`, `GetMessageStatus`, `GetTemplateDetails`, `GetTemplateStatus`, `GetMessageCount` |
+| `client.Messaging` | `SendTemplate`, `CreateTemplate`, `ListTemplates`, `GetMessageStatus`, `GetTemplateDetails`, `GetTemplateStatus`, `GetMessageCount` |
 | `client.Batch` | `Create`, `UpsertContacts`, `Send`, `GetStatus`, `GetDetails`, `Delete` |
 
 ## Error Handling
@@ -80,6 +80,7 @@ See the [`examples/`](examples/) directory for runnable code covering:
 - [`02_batch_messaging`](examples/02_batch_messaging/main.go) — full batch campaign lifecycle
 - [`03_advanced_usage`](examples/03_advanced_usage/main.go) — custom HTTP client, logger, mocking
 - [`04_create_template`](examples/04_create_template/main.go) — create text, image, video, and auth templates
+- [`05_list_templates`](examples/05_list_templates/main.go) — list, search, and filter templates
 
 ## Contributing
 

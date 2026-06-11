@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -700,4 +702,115 @@ func TestAPIError_sentinels(t *testing.T) {
 			t.Errorf("code=%s: expected errors.Is(err, %v), got %v", tt.code, tt.sentinel, err)
 		}
 	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ListTemplates
+// ──────────────────────────────────────────────────────────────────────────────
+
+func TestListTemplates_success(t *testing.T) {
+	body := map[string]any{
+		"status": "success",
+		"data": map[string]any{
+			"templates": []any{
+				map[string]any{
+					"name":           "order_update",
+					"template_id":    "475546217187442007",
+					"category":       "UTILITY",
+					"status":         "APPROVED",
+					"header_type":    "TEXT",
+					"is_favorite":    false,
+					"is_default":     false,
+					"variable_count": 2,
+					"created_at":     "2024-01-15T10:00:00Z",
+				},
+			},
+			"stats": []any{
+				map[string]any{"label": "Templates Created", "value": "1"},
+			},
+			"meta": map[string]any{
+				"current_page": 1,
+				"last_page":    1,
+				"per_page":     10,
+				"total":        1,
+			},
+		},
+	}
+
+	_, client := newTestServer(t, jsonHandler(t, http.StatusOK, body))
+	resp, err := client.Messaging.ListTemplates(context.Background(), &zaple.ListTemplatesParams{
+		Status:  "APPROVED",
+		PerPage: 10,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Templates) != 1 {
+		t.Fatalf("expected 1 template, got %d", len(resp.Templates))
+	}
+	if resp.Templates[0].TemplateID != "475546217187442007" {
+		t.Errorf("unexpected template ID: %s", resp.Templates[0].TemplateID)
+	}
+	if resp.Meta.Total != 1 {
+		t.Errorf("expected meta.total=1, got %d", resp.Meta.Total)
+	}
+	if len(resp.Stats) != 1 {
+		t.Errorf("expected 1 stat, got %d", len(resp.Stats))
+	}
+}
+
+func TestListTemplates_nilParams(t *testing.T) {
+	body := map[string]any{
+		"status": "success",
+		"data": map[string]any{
+			"templates": []any{},
+			"stats":     []any{},
+			"meta":      map[string]any{"current_page": 1, "last_page": 1, "per_page": 10, "total": 0},
+		},
+	}
+	_, client := newTestServer(t, jsonHandler(t, http.StatusOK, body))
+	resp, err := client.Messaging.ListTemplates(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+}
+
+func TestListTemplates_queryParams(t *testing.T) {
+	var capturedURL string
+	_, client := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedURL = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"success","data":{"templates":[],"stats":[],"meta":{"current_page":1,"last_page":1,"per_page":5,"total":0}}}`))
+	}))
+
+	active := true
+	_, err := client.Messaging.ListTemplates(context.Background(), &zaple.ListTemplatesParams{
+		Search:   "order",
+		Page:     2,
+		PerPage:  5,
+		Category: "UTILITY",
+		Status:   "APPROVED",
+		Active:   &active,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{"search=order", "page=2", "per_page=5", "category=UTILITY", "status=APPROVED", "active=true"} {
+		if !containsParam(capturedURL, want) {
+			t.Errorf("query string %q missing %q", capturedURL, want)
+		}
+	}
+}
+
+func containsParam(query, param string) bool {
+	vals, err := url.ParseQuery(query)
+	if err != nil {
+		return false
+	}
+	key, val, _ := strings.Cut(param, "=")
+	return vals.Get(key) == val
 }
